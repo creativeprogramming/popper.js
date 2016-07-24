@@ -237,7 +237,7 @@
               var now = Popper.prototype._.now();
               if (!previous && options.leading === false) previous = now;
               var remaining = wait - (now - previous);
-              context = Popper.prototype;
+              context = this;
               args = arguments;
               if (remaining <= 0 || remaining > wait) {
                 if (timeout) {
