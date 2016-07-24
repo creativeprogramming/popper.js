@@ -227,17 +227,17 @@
             if (!options) options = {};
         
             var later = function() {
-              previous = options.leading === false ? 0 : this._.now();
+              previous = options.leading === false ? 0 :  Popper.prototype._.now();
               timeout = null;
               result = func.apply(context, args);
               if (!timeout) context = args = null;
             };
         
             var throttled = function() {
-              var now = this._.now();
+              var now = Popper.prototype._.now();
               if (!previous && options.leading === false) previous = now;
               var remaining = wait - (now - previous);
-              context = this;
+              context = Popper.prototype;
               args = arguments;
               if (remaining <= 0 || remaining > wait) {
                 if (timeout) {
