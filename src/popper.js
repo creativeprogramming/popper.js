@@ -75,6 +75,9 @@
         modifiers: [ 'shift', 'offset', 'preventOverflow', 'keepTogether', 'arrow', 'flip', 'applyStyle'],
 
         modifiersIgnored: [],
+        
+        //limit the max repaint and computation framerate to achieve more performance and less resource usage on the user browser (and save threes ;)
+        maxFps: 60
     };
 
     /**
@@ -87,15 +90,21 @@
      * @param {Array} [popper.classNames=['popper']] Array of classes to apply to the generated popper.
      * @param {Array} [popper.attributes] Array of attributes to apply, specify `attr:value` to assign a value to it.
      * @param {HTMLElement|String} [popper.parent=window.document.body] The parent element, given as HTMLElement or as query string.
-     * @param {String} [popper.content=''] The content of the popper, it can be text or HTML, in case of HTML, enable `allowHtml`.
-     * @param {Boolean} [popper.allowHtml=false] If set to true, the `content` will be parsed as HTML.
+     * @param {String} [popper.content=''] The content of the popper, it can be text, html, or node; if it is not text, set `contentType` to `html` or `node`.
+     * @param {String} [popper.contentType='text'] If `html`, the `content` will be parsed as HTML. If `node`, it will be appended as-is.
      * @param {String} [popper.arrowTagName='div'] Same as `popper.tagName` but for the arrow element.
      * @param {Array} [popper.arrowClassNames='popper__arrow'] Same as `popper.classNames` but for the arrow element.
      * @param {String} [popper.arrowAttributes=['x-arrow']] Same as `popper.attributes` but for the arrow element.
      * @param {Object} options
      * @param {String} [options.placement=bottom]
-     *      Placement of the popper accepted values: `top(-left, -right), right(-left, -right), bottom(-left, -right),
-     *      left(-left, -right)`
+     *      Placement of the popper accepted values: `top(-start, -end), right(-start, -end), bottom(-start, -right),
+     *      left(-start, -end)`
+     *
+     * @param {HTMLElement|String} [options.arrowElement='[x-arrow]']
+     *      The DOM Node used as arrow for the popper, or a CSS selector used to get the DOM node. It must be child of
+     *      its parent Popper. Popper.js will apply to the given element the style required to align the arrow with its
+     *      reference element.
+     *      By default, it will look for a child node of the popper with the `x-arrow` attribute.
      *
      * @param {Boolean} [options.gpuAcceleration=true]
      *      When this property is set to true, the popper position will be applied using CSS3 translate3d, allowing the
@@ -155,32 +164,105 @@
         // with {} we create a new object with the options inside it
         this._options = Object.assign({}, DEFAULTS, options);
 
-        // iterate trough the list of modifiers, the ones defined as strings refers to internal methods of Popper.js
-        // so we return the corresponding method
-        this._options.modifiers = this._options.modifiers.map(function(modifier) {
-            if (typeof modifier === 'string') {
-                if (this._options.modifiersIgnored.indexOf(modifier) !== -1) {
-                    return;
-                }
-                return this.modifiers[modifier];
-            } else {
-                return modifier;
+        // refactoring modifiers' list
+        this._options.modifiers = this._options.modifiers.map(function(modifier){
+            // remove ignored modifiers
+            if (this._options.modifiersIgnored.indexOf(modifier) !== -1) return;
+
+            // set the x-placement attribute before everything else because it could be used to add margins to the popper
+            // margins needs to be calculated to get the correct popper offsets
+            if (modifier === 'applyStyle') {
+                this._popper.setAttribute('x-placement', this._options.placement);
             }
+
+            // return predefined modifier identified by string or keep the custom one
+            return this.modifiers[modifier] || modifier;
         }.bind(this));
 
-        // set the x-placement attribute before everything else because it could be used to add margins to the popper
-        // margins needs to be calculated to get the correct popper offsets
-        if (this._options.modifiers.indexOf('applyStyle') !== -1) {
-            this._popper.setAttribute('x-placement', this._options.placement);
-        }
+        // make sure to apply the popper position before any computation
+        this.state.position = this._getPosition(this._popper, this._reference);
+        setStyle(this._popper, { position: this.state.position});
+
+        // determine how we should set the origin of offsets
+        this.state.isParentTransformed = this._getIsParentTransformed(this._popper);
 
         // fire the first update to position the popper in the right place
         this.update();
 
         // setup event listeners, they will take care of update the position in specific situations
         this._setupEventListeners();
+        return this;
     }
 
+    //
+    // Utils
+    // 
+    /** 
+     * 
+     * Some utility functions ported from underscore.js v1.8.3
+     *
+     * Underscore.js as a permissive open source license and very good decoupling level in its code,
+     * so we can port here just some tiny bits it as we need just some utils functions: a 'dep' that's as tiny
+     * to be considered a 'no-dep'
+     * 
+     * @license https://github.com/jashkenas/underscore/blob/master/LICENSE
+     * @external 
+     * @see {@link http://underscorejs.org/}
+     *
+     * 
+    */
+    Popper.prototype._ = {
+          // A (possibly faster) way to get the current timestamp as an integer.
+          now = Date.now || function() {
+              return new Date().getTime();
+          },
+          // Returns a function, that, when invoked, will only be triggered at most once
+          // during a given window of time. Normally, the throttled function will run
+          // as much as it can, without ever going more than once per `wait` duration;
+          // but if you'd like to disable the execution on the leading edge, pass
+          // `{leading: false}`. To disable execution on the trailing edge, ditto.
+          _.throttle = function(func, wait, options) {
+            var timeout, context, args, result;
+            var previous = 0;
+            if (!options) options = {};
+        
+            var later = function() {
+              previous = options.leading === false ? 0 : this._.now();
+              timeout = null;
+              result = func.apply(context, args);
+              if (!timeout) context = args = null;
+            };
+        
+            var throttled = function() {
+              var now = this._.now();
+              if (!previous && options.leading === false) previous = now;
+              var remaining = wait - (now - previous);
+              context = this;
+              args = arguments;
+              if (remaining <= 0 || remaining > wait) {
+                if (timeout) {
+                  clearTimeout(timeout);
+                  timeout = null;
+                }
+                previous = now;
+                result = func.apply(context, args);
+                if (!timeout) context = args = null;
+              } else if (!timeout && options.trailing !== false) {
+                timeout = setTimeout(later, remaining);
+              }
+              return result;
+            };
+        
+            throttled.cancel = function() {
+              clearTimeout(timeout);
+              previous = 0;
+              timeout = context = args = null;
+            };
+        
+            return throttled;
+          };
+    };
+        
 
     //
     // Methods
@@ -202,6 +284,7 @@
         if (this._options.removeOnDestroy) {
             this._popper.remove();
         }
+        return this;
     };
 
     /**
@@ -210,7 +293,7 @@
      * @memberof Popper
      */
     Popper.prototype.update = function() {
-        var data = { instance: this };
+        var data = { instance: this, styles: {} };
 
         // store placement inside the data object, modifiers will be able to edit `placement` if needed
         // and refer to _originalPlacement to know the original value
@@ -240,17 +323,20 @@
     Popper.prototype.onCreate = function(callback) {
         // the createCallbacks return as first argument the popper instance
         callback(this);
+        return this;
     };
 
     /**
      * If a function is passed, it will be executed after each update of popper with as first argument the set of coordinates and informations
      * used to style popper and its arrow.
+     * NOTE: it doesn't get fired on the first call of the `Popper.update()` method inside the `Popper` constructor!
      * @method
      * @memberof Popper
      * @param {Function} callback
      */
     Popper.prototype.onUpdate = function(callback) {
         this.state.updateCallback = callback;
+        return this;
     };
 
     /**
@@ -267,10 +353,11 @@
             attributes: [],
             parent: root.document.body,
             content: '',
-            allowHtml: false,
+            contentType: 'text',
             arrowTagName: 'div',
             arrowClassNames: [ 'popper__arrow' ],
-            arrowAttributes: [ 'x-arrow']
+            arrowAttributes: [ 'x-arrow'],
+            maxFps: 60
         };
         config = Object.assign({}, defaultConfig, config);
 
@@ -279,7 +366,9 @@
         var popper = d.createElement(config.tagName);
         addClassNames(popper, config.classNames);
         addAttributes(popper, config.attributes);
-        if (config.allowHtml) {
+        if (config.contentType === 'node') {
+            popper.appendChild(config.content.jquery ? config.content[0] : config.content);
+        }else if (config.contentType === 'html') {
             popper.innerHTML = config.content;
         } else {
             popper.textContent = config.content;
@@ -292,7 +381,7 @@
             popper.appendChild(arrow);
         }
 
-        var parent = config.parent;
+        var parent = config.parent.jquery ? config.parent[0] : config.parent;
 
         // if the given parent is a string, use it to match an element
         // if more than one element is matched, the first one will be used as parent
@@ -343,10 +432,35 @@
          */
         function addAttributes(element, attributes) {
             attributes.forEach(function(attribute) {
-                element.setAttribute(attribute.split(':')[0], attribute.split(':')[1]);
+                element.setAttribute(attribute.split(':')[0], attribute.split(':')[1] || '');
             });
         }
 
+    };
+
+    /**
+     * Helper used to get the position which will be applied to the popper
+     * @method
+     * @memberof Popper
+     * @param config {HTMLElement} popper element
+     * @returns {HTMLElement} reference element
+     */
+    Popper.prototype._getPosition = function(popper, reference) {
+        var container = getOffsetParent(reference);
+
+        // Decide if the popper will be fixed
+        // If the reference element is inside a fixed context, the popper will be fixed as well to allow them to scroll together
+        var isParentFixed = isFixed(reference, container);
+        return isParentFixed ? 'fixed' : 'absolute';
+    };
+
+    /**
+     * Helper used to determine if the popper's parent is transformed.
+     * @param  {[type]} popper [description]
+     * @return {[type]}        [description]
+     */
+    Popper.prototype._getIsParentTransformed = function(popper) {
+      return isTransformed(popper.parentNode);
     };
 
     /**
@@ -362,19 +476,16 @@
         placement = placement.split('-')[0];
         var popperOffsets = {};
 
-        var container = getOffsetParent(reference);
+        popperOffsets.position = this.state.position;
+        var isParentFixed = popperOffsets.position === 'fixed';
 
-        // Decide if the popper will be fixed
-        // If the reference element is inside a fixed context, the popper will be fixed as well to allow them to scroll together
-        var isParentFixed = isFixed(reference, container);
-        popperOffsets.position = isParentFixed ? 'fixed' : 'absolute';
-        this.state.position = popperOffsets.position;
-
+        var isParentTransformed = this.state.isParentTransformed;
 
         //
         // Get reference element position
         //
-        var referenceOffsets = getOffsetRectRelativeToCustomParent(reference, getOffsetParent(popper), isParentFixed);
+        var offsetParent = (isParentFixed && isParentTransformed) ? getOffsetParent(reference) : getOffsetParent(popper);
+        var referenceOffsets = getOffsetRectRelativeToCustomParent(reference, offsetParent, isParentFixed, isParentTransformed);
 
         //
         // Get popper sizes
@@ -423,7 +534,9 @@
     Popper.prototype._setupEventListeners = function() {
         // NOTE: 1 DOM access here
         this.state.updateBound = this.update.bind(this);
-        root.addEventListener('resize', this.state.updateBound);
+        var minWaitMillis  = 1000/ this._options.maxFps; 
+        var throttledUpdateBound = this._.throttle(this.state.updateBound,minWaitMillis,{leading:false,trailing: true});
+        root.addEventListener('resize', throttledUpdateBound);
         // if the boundariesElement is window we don't need to listen for the scroll event
         if (this._options.boundariesElement !== 'window') {
             var target = getScrollParent(this._reference);
@@ -431,7 +544,9 @@
             if (target === root.document.body || target === root.document.documentElement) {
                 target = root;
             }
-            target.addEventListener('scroll', this.state.updateBound);
+
+            target.addEventListener('scroll', throttledUpdateBound);
+            
         }
     };
 
@@ -598,6 +713,12 @@
             styles.left =left;
             styles.top = top;
         }
+
+        // any property present in `data.styles` will be applied to the popper,
+        // in this way we can make the 3rd party modifiers add custom styles to it
+        // Be aware, modifiers could override the properties defined in the previous
+        // lines of this modifier!
+        Object.assign(styles, data.styles);
 
         setStyle(this._popper, styles);
 
@@ -884,7 +1005,8 @@
         // compute center of the popper
         var center = reference[side] + (reference[len] / 2) - (arrowSize / 2);
 
-        var sideValue = center - popper[side];
+        // Compute the sideValue using the updated popper offsets
+        var sideValue = center - getPopperClientRect(data.offsets.popper)[side];
 
         // prevent arrow from being placed not contiguously to its popper
         sideValue = Math.max(Math.min(popper[len] - arrowSize, sideValue), 0);
@@ -911,11 +1033,19 @@
      */
     function getOuterSizes(element) {
         // NOTE: 1 DOM access here
+        var _display = element.style.display, _visibility = element.style.visibility;
+        element.style.display = 'block'; element.style.visibility = 'hidden';
+        var calcWidthToForceRepaint = element.offsetWidth;
+
+        // original method
         var styles = root.getComputedStyle(element);
         var x = parseFloat(styles.marginTop) + parseFloat(styles.marginBottom);
         var y = parseFloat(styles.marginLeft) + parseFloat(styles.marginRight);
+        var result = { width: element.offsetWidth + y, height: element.offsetHeight + x };
 
-        return { width: element.offsetWidth + y, height: element.offsetHeight + x };
+        // reset element styles
+        element.style.display = _display; element.style.visibility = _visibility;
+        return result;
     }
 
     /**
@@ -1039,6 +1169,21 @@
     }
 
     /**
+     * Check if the given element has transforms applied to itself or a parent
+     * @param  {Element} element
+     * @return {Boolean} answer to "isTransformed?"
+     */
+    function isTransformed(element) {
+      if (element === root.document.body) {
+          return false;
+      }
+      if (getStyleComputedProperty(element, 'transform') !== 'none') {
+          return true;
+      }
+      return element.parentNode ? isTransformed(element.parentNode) : element;
+    }
+
+    /**
      * Set the style to the given popper
      * @function
      * @ignore
@@ -1120,11 +1265,11 @@
      * @param {HTMLElement} parent
      * @return {Object} rect
      */
-    function getOffsetRectRelativeToCustomParent(element, parent, fixed) {
+    function getOffsetRectRelativeToCustomParent(element, parent, fixed, transformed) {
         var elementRect = getBoundingClientRect(element);
         var parentRect = getBoundingClientRect(parent);
 
-        if (fixed) {
+        if (fixed && !transformed) {
             var scrollParent = getScrollParent(parent);
             parentRect.top += scrollParent.scrollTop;
             parentRect.bottom += scrollParent.scrollTop;
