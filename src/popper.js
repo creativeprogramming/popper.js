@@ -75,6 +75,9 @@
         modifiers: [ 'shift', 'offset', 'preventOverflow', 'keepTogether', 'arrow', 'flip', 'applyStyle'],
 
         modifiersIgnored: [],
+        
+        //limit the max repaint and computation framerate to achieve more performance and less resource usage on the user browser (and save threes ;)
+        maxFps: 60
     };
 
     /**
@@ -191,6 +194,76 @@
         return this;
     }
 
+    //
+    // Utils
+    // 
+    /** 
+     * 
+     * Some utility functions ported from underscore.js v1.8.3
+     *
+     * Underscore.js as a permissive open source license and very good decoupling level in its code,
+     * so we can port here just some tiny bits it as we need just some utils functions: a 'dep' that's as tiny
+     * to be considered a 'no-dep'
+     * 
+     * @license https://github.com/jashkenas/underscore/blob/master/LICENSE
+     * @external 
+     * @see {@link http://underscorejs.org/}
+     *
+     * 
+    */
+    Popper.prototype._ = {
+          // A (possibly faster) way to get the current timestamp as an integer.
+          now = Date.now || function() {
+              return new Date().getTime();
+          },
+          // Returns a function, that, when invoked, will only be triggered at most once
+          // during a given window of time. Normally, the throttled function will run
+          // as much as it can, without ever going more than once per `wait` duration;
+          // but if you'd like to disable the execution on the leading edge, pass
+          // `{leading: false}`. To disable execution on the trailing edge, ditto.
+          _.throttle = function(func, wait, options) {
+            var timeout, context, args, result;
+            var previous = 0;
+            if (!options) options = {};
+        
+            var later = function() {
+              previous = options.leading === false ? 0 : this._.now();
+              timeout = null;
+              result = func.apply(context, args);
+              if (!timeout) context = args = null;
+            };
+        
+            var throttled = function() {
+              var now = this._.now();
+              if (!previous && options.leading === false) previous = now;
+              var remaining = wait - (now - previous);
+              context = this;
+              args = arguments;
+              if (remaining <= 0 || remaining > wait) {
+                if (timeout) {
+                  clearTimeout(timeout);
+                  timeout = null;
+                }
+                previous = now;
+                result = func.apply(context, args);
+                if (!timeout) context = args = null;
+              } else if (!timeout && options.trailing !== false) {
+                timeout = setTimeout(later, remaining);
+              }
+              return result;
+            };
+        
+            throttled.cancel = function() {
+              clearTimeout(timeout);
+              previous = 0;
+              timeout = context = args = null;
+            };
+        
+            return throttled;
+          };
+    };
+        // A (possibly faster) way to get the current timestamp as an integer.
+        this._.;
 
     //
     // Methods
@@ -284,7 +357,8 @@
             contentType: 'text',
             arrowTagName: 'div',
             arrowClassNames: [ 'popper__arrow' ],
-            arrowAttributes: [ 'x-arrow']
+            arrowAttributes: [ 'x-arrow'],
+            maxFps: 60
         };
         config = Object.assign({}, defaultConfig, config);
 
@@ -461,7 +535,9 @@
     Popper.prototype._setupEventListeners = function() {
         // NOTE: 1 DOM access here
         this.state.updateBound = this.update.bind(this);
-        root.addEventListener('resize', this.state.updateBound);
+        var minWaitMillis  = 1000/ this._options.maxFps; 
+        var throttledUpdateBound = this._.throttle(this.state.updateBound,minWaitMillis,{leading:false,trailing: true});
+        root.addEventListener('resize', throttledUpdateBound);
         // if the boundariesElement is window we don't need to listen for the scroll event
         if (this._options.boundariesElement !== 'window') {
             var target = getScrollParent(this._reference);
@@ -469,7 +545,9 @@
             if (target === root.document.body || target === root.document.documentElement) {
                 target = root;
             }
-            target.addEventListener('scroll', this.state.updateBound);
+
+            target.addEventListener('scroll', throttledUpdateBound);
+            
         }
     };
 
