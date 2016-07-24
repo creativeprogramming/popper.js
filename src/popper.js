@@ -221,7 +221,7 @@
           // as much as it can, without ever going more than once per `wait` duration;
           // but if you'd like to disable the execution on the leading edge, pass
           // `{leading: false}`. To disable execution on the trailing edge, ditto.
-          _.throttle = function(func, wait, options) {
+          throttle = function(func, wait, options) {
             var timeout, context, args, result;
             var previous = 0;
             if (!options) options = {};
