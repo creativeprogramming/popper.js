@@ -77,7 +77,8 @@
         modifiersIgnored: [],
         
         //limit the max repaint and computation framerate to achieve more performance and less resource usage on the user browser and even save some trees ;)
-        maxFps: 60
+        maxFps: 60,
+        afterUpdateTriggerDelayMs: 200
     };
 
     /**
@@ -331,9 +332,13 @@
             this.state.updateCallback(data);
         }
         if (typeof this.state.afterUpdateCallback === 'function') {
-            var debouncedCallback = this._.debounce(function(){this.state.afterUpdateCallback(data);},50,false);
-            debouncedCallback();
+            if (typeof this.state.debouncedCallback === 'undefined'){
+             this.state.debouncedCallback = this._.debounce(this.state.afterUpdateCallback,this._option.afterUpdateDebounceMillis,false,data);
+            }else{
+                this.state.debouncedCallback();
+            }
         }
+        
     };
 
     /**
@@ -366,6 +371,7 @@
      * If a function is passed, it will be executed after each update of popper with as first argument the set of coordinates and informations
      * used to style popper and its arrow.
      * NOTE: it doesn't get fired on the first call of the `Popper.update()` method inside the `Popper` constructor! 
+     * NOTE: it will be triggered with <options.afterUpdateTriggerDelayMs> milliseconds of delay after any update() 
      * @method
      * @memberof Popper
      * @param {Function} callback
@@ -569,9 +575,9 @@
      */
     Popper.prototype._setupEventListeners = function() {
         // NOTE: 1 DOM access here
-        var minWaitMillis  = 1000/ this._options.maxFps || 1; 
+        var minWaitMs  = 1000/ this._options.maxFps || 1; 
         this.state.updateBound = this.update.bind(this);
-        this.state.throttledUpdateBound = this._.throttle(this.state.updateBound,minWaitMillis,{leading:false,trailing: true});
+        this.state.throttledUpdateBound = this._.throttle(this.state.updateBound,minWaitMs,{leading:false,trailing: true});
         root.addEventListener('resize', this.state.throttledUpdateBound);
         // if the boundariesElement is window we don't need to listen for the scroll event
         if (this._options.boundariesElement !== 'window') {
