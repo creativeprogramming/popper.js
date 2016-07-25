@@ -333,7 +333,7 @@
         }
         if (typeof this.state.afterUpdateCallback === 'function') {
             if (typeof this.state.debouncedCallback === 'undefined'){
-             this.state.debouncedCallback = this._.debounce(this.state.afterUpdateCallback,this._option.afterUpdateDebounceMs,false,data);
+             this.state.debouncedCallback = this._.debounce(this.state.afterUpdateCallback,this._option.afterUpdateTriggerDelayMs,false,data);
             }else{
                 this.state.debouncedCallback();
             }
