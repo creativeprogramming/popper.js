@@ -585,7 +585,7 @@
         var minWaitMillis  = 1000/ this._options.maxFps || 1; 
         this.state.updateBound = this.update.bind(this);
         this.state.throttledUpdateBound = this._.throttle(this.state.updateBound,minWaitMillis,{leading:false,trailing: true});
-        root.addEventListener('resize', throttledUpdateBound);
+        root.addEventListener('resize', this.state.throttledUpdateBound);
         // if the boundariesElement is window we don't need to listen for the scroll event
         if (this._options.boundariesElement !== 'window') {
             var target = getScrollParent(this._reference);
@@ -594,7 +594,7 @@
                 target = root;
             }
 
-            target.addEventListener('scroll', throttledUpdateBound);
+            target.addEventListener('scroll', this.state.throttledUpdateBound);
             
         }
     };
