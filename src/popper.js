@@ -260,7 +260,39 @@
             };
         
             return throttled;
-          }
+          },
+          // Returns a function, that, as long as it continues to be invoked, will not
+          // be triggered. The function will be called after it stops being called for
+          // N milliseconds. If `immediate` is passed, trigger the function on the
+          // leading edge, instead of the trailing.
+          debounce : function(func, wait, immediate) {
+            var timeout, result;
+        
+            var later = function(context, args) {
+              timeout = null;
+              if (args) result = func.apply(context, args);
+            };
+        
+            var debounced = restArgs(function(args) {
+              if (timeout) clearTimeout(timeout);
+              if (immediate) {
+                var callNow = !timeout;
+                timeout = setTimeout(later, wait);
+                if (callNow) result = func.apply(this, args);
+              } else {
+                timeout = _.delay(later, wait, this, args);
+              }
+        
+              return result;
+            });
+        
+            debounced.cancel = function() {
+              clearTimeout(timeout);
+              timeout = null;
+            };
+        
+            return debounced;
+          };
     };
         
 
@@ -311,7 +343,10 @@
         if (typeof this.state.updateCallback === 'function') {
             this.state.updateCallback(data);
         }
-
+        if (typeof this.state.afterUpdateCallback === 'function') {
+            var debouncedCallback = this._.debounce(function(){this.state.afterUpdateCallback(data);},50,false);
+            debouncedCallback();
+        }
     };
 
     /**
@@ -329,13 +364,27 @@
     /**
      * If a function is passed, it will be executed after each update of popper with as first argument the set of coordinates and informations
      * used to style popper and its arrow.
-     * NOTE: it doesn't get fired on the first call of the `Popper.update()` method inside the `Popper` constructor!
+     * NOTE: it doesn't get fired on the first call of the `Popper.update()` method inside the `Popper` constructor! 
+     * This event is fired for each animation frame (e.g. multiple times during scrolling and resizing)
      * @method
      * @memberof Popper
      * @param {Function} callback
      */
     Popper.prototype.onUpdate = function(callback) {
         this.state.updateCallback = callback;
+        return this;
+    };
+    
+    /**
+     * If a function is passed, it will be executed after each update of popper with as first argument the set of coordinates and informations
+     * used to style popper and its arrow.
+     * NOTE: it doesn't get fired on the first call of the `Popper.update()` method inside the `Popper` constructor! 
+     * @method
+     * @memberof Popper
+     * @param {Function} callback
+     */
+    Popper.prototype.onAfterUpdate = function(callback) {
+        this.state.afterUpdateCallback = callback;
         return this;
     };
 
@@ -533,9 +582,9 @@
      */
     Popper.prototype._setupEventListeners = function() {
         // NOTE: 1 DOM access here
+        var minWaitMillis  = 1000/ this._options.maxFps || 1; 
         this.state.updateBound = this.update.bind(this);
-        var minWaitMillis  = 1000/ this._options.maxFps; 
-        var throttledUpdateBound = this._.throttle(this.state.updateBound,minWaitMillis,{leading:false,trailing: true});
+        this.state.throttledUpdateBound = this._.throttle(this.state.updateBound,minWaitMillis,{leading:false,trailing: true});
         root.addEventListener('resize', throttledUpdateBound);
         // if the boundariesElement is window we don't need to listen for the scroll event
         if (this._options.boundariesElement !== 'window') {
@@ -558,14 +607,14 @@
      */
     Popper.prototype._removeEventListeners = function() {
         // NOTE: 1 DOM access here
-        root.removeEventListener('resize', this.state.updateBound);
+        root.removeEventListener('resize', this.state.throttledUpdateBound);
         if (this._options.boundariesElement !== 'window') {
             var target = getScrollParent(this._reference);
             // here it could be both `body` or `documentElement` thanks to Firefox, we then check both
             if (target === root.document.body || target === root.document.documentElement) {
                 target = root;
             }
-            target.removeEventListener('scroll', this.state.updateBound);
+            target.removeEventListener('scroll', this.state.throttledUpdateBound);
         }
         this.state.updateBound = null;
     };
