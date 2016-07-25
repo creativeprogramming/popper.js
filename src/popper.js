@@ -76,7 +76,7 @@
 
         modifiersIgnored: [],
         
-        //limit the max repaint and computation framerate to achieve more performance and less resource usage on the user browser (and save threes ;)
+        //limit the max repaint and computation framerate to achieve more performance and less resource usage on the user browser and even save some trees ;)
         maxFps: 60
     };
 
